@@ -134,12 +134,9 @@ public final class DependencyManager {
         }
         
         final File librariesDirectory = new File(pluginDataFolder, "libraries");
-        if (!librariesDirectory.exists()) {
-            librariesDirectory.mkdirs();
-            this.logger.info("Created libraries directory: " + librariesDirectory.getAbsolutePath());
-        } else {
-            this.logger.fine("Using existing libraries directory: " + librariesDirectory.getAbsolutePath());
-        }
+		if (!librariesDirectory.exists()) {
+			librariesDirectory.mkdirs();
+		}
         
         return librariesDirectory;
     }
