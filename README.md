@@ -32,6 +32,8 @@ JEDependency is a powerful, lightweight library that provides automatic dependen
 
 ## 📦 Installation
 
+Fork the project, do a maven/gradle clean install - install it locally on your device. So you can access it through gradle/maven using:
+
 ### Maven
 ```xml
 <dependency>
