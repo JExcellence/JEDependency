@@ -68,8 +68,6 @@ public final class DependencyDownloader {
             throw new IllegalArgumentException("Target directory cannot be null");
         }
         
-        this.logger.info("Downloading dependency: " + gavCoordinates);
-        
         final DependencyCoordinate coordinate = this.parseGavCoordinates(gavCoordinates);
         if (coordinate == null) {
             return null;
@@ -78,9 +76,11 @@ public final class DependencyDownloader {
         final File targetJarFile = this.createTargetFile(coordinate, targetDirectory);
         
         if (this.isFileAlreadyExists(targetJarFile)) {
-            this.logger.info("Dependency already exists: " + targetJarFile.getName());
+            this.logger.fine("Dependency already exists: " + targetJarFile.getName());
             return targetJarFile;
         }
+        
+        this.logger.fine("Downloading dependency: " + gavCoordinates);
         
         return this.attemptDownloadFromRepositories(coordinate, targetJarFile);
     }
@@ -132,8 +132,6 @@ public final class DependencyDownloader {
      * @return the downloaded file, or null if all repositories failed
      */
     private File attemptDownloadFromRepositories(final DependencyCoordinate coordinate, final File targetFile) {
-        this.logger.info("Attempting download from available repositories");
-        
         for (final RepositoryType repository : RepositoryType.values()) {
             final String downloadUrl = repository.buildPath(
                 coordinate.getGroupId(), 
@@ -141,17 +139,15 @@ public final class DependencyDownloader {
                 coordinate.getVersion()
             );
             
-            this.logger.fine("Trying repository: " + repository.name() + " at " + downloadUrl);
+            this.logger.finest("Trying repository: " + repository.name() + " at " + downloadUrl);
             
             if (this.downloadFromUrl(downloadUrl, targetFile)) {
-                this.logger.info("Successfully downloaded from repository: " + repository.name());
+                this.logger.fine("Downloaded from repository: " + repository.name());
                 return targetFile;
-            } else {
-                this.logger.fine("Download failed from repository: " + repository.name());
             }
         }
         
-        this.logger.severe("Failed to download " + coordinate.getGavString() + " from any repository");
+        this.logger.warning("Failed to download " + coordinate.getGavString() + " from any repository");
         return null;
     }
     

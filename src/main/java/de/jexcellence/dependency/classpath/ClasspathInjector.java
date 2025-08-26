@@ -62,7 +62,7 @@ public final class ClasspathInjector {
             throw new IllegalArgumentException("JAR file cannot be null");
         }
         
-        this.logger.info("Injecting JAR into classpath: " + jarFile.getName());
+        this.logger.fine("Injecting JAR into classpath: " + jarFile.getName());
         
         if (!this.validateJarFile(jarFile)) {
             return false;
@@ -79,7 +79,7 @@ public final class ClasspathInjector {
             
             this.performInjection(urlClassLoader, jarUrl);
             
-            this.logger.info("Successfully injected JAR: " + jarFile.getName());
+            this.logger.fine("Successfully injected JAR: " + jarFile.getName());
             return true;
             
         } catch (final Exception exception) {

@@ -76,7 +76,7 @@ public final class DependencyManager {
      * @param additionalDependencies optional array of additional GAV coordinates to load
      */
     public void initialize(final String[] additionalDependencies) {
-        this.logger.info("Initializing dependency management system");
+        this.logger.info("Initializing dependency management system...");
         
         final File pluginJarFile = this.determinePluginJarLocation();
         if (pluginJarFile == null) {
@@ -84,19 +84,22 @@ public final class DependencyManager {
             return;
         }
         
-        this.logger.info("Plugin JAR located at: " + pluginJarFile.getAbsolutePath());
-        
         final File librariesDirectory = this.setupLibrariesDirectory();
         final ClassLoader targetClassLoader = this.anchorClass.getClassLoader();
         
         this.performModuleDeencapsulation();
         
         final List<String> allDependencies = this.collectAllDependencies(additionalDependencies);
-        this.logger.info("Found " + allDependencies.size() + " dependencies to process");
         
-        this.processDependencies(allDependencies, librariesDirectory, targetClassLoader);
+        if (allDependencies.isEmpty()) {
+            this.logger.info("No dependencies to process");
+            return;
+        }
         
-        this.logLibrariesDirectoryContents(librariesDirectory);
+        this.logger.info("Processing " + allDependencies.size() + " dependencies...");
+        final DependencyProcessingResult result = this.processDependencies(allDependencies, librariesDirectory, targetClassLoader);
+        
+        this.logProcessingSummary(result, librariesDirectory);
         this.logger.info("Dependency management system initialization completed");
     }
     
@@ -190,49 +193,81 @@ public final class DependencyManager {
      * @param dependencies list of dependency GAV coordinates
      * @param librariesDirectory directory to store downloaded dependencies
      * @param targetClassLoader classloader to inject dependencies into
+     * @return processing result summary
      */
-    private void processDependencies(final List<String> dependencies, 
-                                   final File librariesDirectory, 
-                                   final ClassLoader targetClassLoader) {
+    private DependencyProcessingResult processDependencies(final List<String> dependencies, 
+                                                         final File librariesDirectory, 
+                                                         final ClassLoader targetClassLoader) {
+        final DependencyProcessingResult result = new DependencyProcessingResult();
+        
         for (final String dependencyCoordinate : dependencies) {
-            this.logger.info("Processing dependency: " + dependencyCoordinate);
+            result.totalDependencies++;
             
             final File downloadedJarFile = this.dependencyDownloader.downloadDependency(
                 dependencyCoordinate, librariesDirectory);
             
             if (downloadedJarFile != null && downloadedJarFile.isFile()) {
-                this.logger.info("Successfully downloaded: " + downloadedJarFile.getName());
+                result.successfulDownloads++;
                 
                 final boolean injectionSuccessful = this.classpathInjector.injectIntoClasspath(
                     targetClassLoader, downloadedJarFile);
                 
                 if (injectionSuccessful) {
-                    this.logger.info("Successfully injected into classpath: " + downloadedJarFile.getName());
+                    result.successfulInjections++;
+                    result.processedDependencies.add(dependencyCoordinate);
                 } else {
-                    this.logger.warning("Failed to inject into classpath: " + downloadedJarFile.getName());
+                    result.failedInjections++;
+                    result.failedDependencies.add(dependencyCoordinate);
                 }
             } else {
-                this.logger.severe("Failed to download dependency: " + dependencyCoordinate);
+                result.failedDownloads++;
+                result.failedDependencies.add(dependencyCoordinate);
             }
         }
+        
+        return result;
     }
     
     /**
-     * Logs the contents of the libraries directory for debugging purposes.
+     * Logs a summary of the dependency processing results.
      * 
-     * @param librariesDirectory the libraries directory to inspect
+     * @param result the processing result
+     * @param librariesDirectory the libraries directory
      */
-    private void logLibrariesDirectoryContents(final File librariesDirectory) {
-        this.logger.info("=== Libraries Directory Contents ===");
+    private void logProcessingSummary(final DependencyProcessingResult result, final File librariesDirectory) {
+        this.logger.info("Dependency processing summary:");
+        this.logger.info("  Total: " + result.totalDependencies + 
+                         " | Downloaded: " + result.successfulDownloads + 
+                         " | Injected: " + result.successfulInjections + 
+                         " | Failed: " + (result.failedDownloads + result.failedInjections));
+        
+        if (!result.failedDependencies.isEmpty()) {
+            this.logger.warning("Failed dependencies: " + String.join(", ", result.failedDependencies));
+        }
+        
+        // Count total libraries in directory
         final File[] libraryFiles = librariesDirectory.listFiles();
+        int totalLibraries = 0;
         if (libraryFiles != null) {
             for (final File libraryFile : libraryFiles) {
                 if (libraryFile.isFile() && libraryFile.getName().endsWith(".jar")) {
-                    this.logger.info("Library: " + libraryFile.getName() + 
-                                   " (" + libraryFile.length() + " bytes)");
+                    totalLibraries++;
                 }
             }
         }
-        this.logger.info("=== End Libraries Directory Contents ===");
+        this.logger.info("Libraries directory contains " + totalLibraries + " JAR files");
+    }
+    
+    /**
+     * Internal class to track dependency processing results.
+     */
+    private static final class DependencyProcessingResult {
+        public int totalDependencies = 0;
+        public int successfulDownloads = 0;
+        public int successfulInjections = 0;
+        public int failedDownloads = 0;
+        public int failedInjections = 0;
+        public final List<String> processedDependencies = new ArrayList<>();
+        public final List<String> failedDependencies = new ArrayList<>();
     }
 }
