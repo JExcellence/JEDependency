@@ -48,7 +48,7 @@ public final class JEDependency {
      *   <li>Create a libraries directory in the plugin's data folder</li>
      *   <li>Load dependencies from {@code /dependency/dependencies.yml} if present</li>
      *   <li>Download missing dependencies from Maven repositories</li>
-     *   <li>Inject all dependencies into the current classpath</li>
+     *   <li>Inject all dependencies into the plugin's classloader</li>
      * </ul>
      * 
      * @param plugin the plugin instance that owns the dependencies
@@ -63,6 +63,8 @@ public final class JEDependency {
 		final Class<?> anchorClass,
 		final String[] additionalDependencies
     ) {
+        plugin.getLogger().info("JEDependency initializing on " + getServerType());
+        
         if (isPaperPluginLoaderActive()) {
             plugin.getLogger().info("Paper plugin loader detected - skipping manual JEDependency initialization");
             return;
@@ -70,6 +72,8 @@ public final class JEDependency {
 		
         final DependencyManager dependencyManager = new DependencyManager(plugin, anchorClass);
         dependencyManager.initialize(additionalDependencies);
+        
+        plugin.getLogger().info("JEDependency initialization completed. Dependencies are isolated to this plugin.");
     }
     
     /**
@@ -95,18 +99,57 @@ public final class JEDependency {
      * @return true if Paper plugin loader is active, false otherwise
      */
     private static boolean isPaperPluginLoaderActive() {
+        // Check system property first
         final String paperLoaderActive = System.getProperty("paper.plugin.loader.active");
         if ("true".equals(paperLoaderActive)) {
             return true;
         }
-		
+        
+        // Check for Paper-specific classes that indicate modern Paper plugin loading
         try {
             Class.forName("io.papermc.paper.plugin.loader.PluginLoader");
-            // If we can load the PluginLoader class, we're likely on Paper
-            // But only skip if the system property is also set to avoid false positives
+            Class.forName("io.papermc.paper.plugin.bootstrap.PluginBootstrap");
+            
+            // Only skip if we have clear evidence of Paper plugin loader being active
+            // This is more restrictive to avoid false positives on regular Paper servers
             return "true".equals(paperLoaderActive);
         } catch (final ClassNotFoundException exception) {
+            // Paper plugin loader classes not found, proceed with manual loading
             return false;
+        }
+    }
+    
+    /**
+     * Checks if we're running on Paper (but not necessarily using Paper plugin loader).
+     * 
+     * @return true if running on Paper, false if on Spigot/CraftBukkit
+     */
+    public static boolean isPaperServer() {
+        try {
+            Class.forName("com.destroystokyo.paper.PaperConfig");
+            return true;
+        } catch (final ClassNotFoundException exception) {
+            try {
+                Class.forName("io.papermc.paper.configuration.Configuration");
+                return true;
+            } catch (final ClassNotFoundException exception2) {
+                return false;
+            }
+        }
+    }
+    
+    /**
+     * Gets server type information for debugging.
+     * 
+     * @return server type string
+     */
+    public static String getServerType() {
+        if (isPaperPluginLoaderActive()) {
+            return "Paper (with plugin loader)";
+        } else if (isPaperServer()) {
+            return "Paper (legacy mode)";
+        } else {
+            return "Spigot/CraftBukkit";
         }
     }
 }

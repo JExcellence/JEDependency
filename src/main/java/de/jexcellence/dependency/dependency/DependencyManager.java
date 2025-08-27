@@ -23,7 +23,7 @@ import java.util.logging.Logger;
  * <ul>
  *   <li>Creating a libraries directory in the plugin's data folder</li>
  *   <li>Downloading missing dependencies from Maven repositories</li>
- *   <li>Injecting the downloaded JARs into the current classpath</li>
+ *   <li>Injecting the downloaded JARs into the plugin's classloader</li>
  * </ul>
  * 
  * @author JExcellence
@@ -36,7 +36,7 @@ public final class DependencyManager {
     private final JavaPlugin plugin;
     private final Class<?> anchorClass;
     private final DependencyDownloader dependencyDownloader;
-    private final ClasspathInjector    classpathInjector;
+    private final ClasspathInjector classpathInjector;
     private final YamlDependencyLoader yamlLoader;
     
     /**
@@ -70,13 +70,13 @@ public final class DependencyManager {
      *   <li>Set up the libraries directory</li>
      *   <li>Perform module deencapsulation for Java 9+ compatibility</li>
      *   <li>Load dependencies from YAML configuration if present</li>
-     *   <li>Download and inject all dependencies into the classpath</li>
+     *   <li>Download and inject all dependencies into the plugin's classloader</li>
      * </ul>
      * 
      * @param additionalDependencies optional array of additional GAV coordinates to load
      */
     public void initialize(final String[] additionalDependencies) {
-        this.logger.info("Initializing dependency management system...");
+        this.logger.info("Initializing dependency management system for plugin: " + this.plugin.getName());
         
         final File pluginJarFile = this.determinePluginJarLocation();
         if (pluginJarFile == null) {
@@ -134,9 +134,9 @@ public final class DependencyManager {
         }
         
         final File librariesDirectory = new File(pluginDataFolder, "libraries");
-		if (!librariesDirectory.exists()) {
-			librariesDirectory.mkdirs();
-		}
+        if (!librariesDirectory.exists()) {
+            librariesDirectory.mkdirs();
+        }
         
         return librariesDirectory;
     }
@@ -253,6 +253,7 @@ public final class DependencyManager {
             }
         }
         this.logger.info("Libraries directory contains " + totalLibraries + " JAR files");
+        this.logger.info("Dependencies are isolated to this plugin's classloader");
     }
     
     /**
