@@ -32,7 +32,6 @@ dependencies:
   - me.devnatan:inventory-framework-anvil-input:3.5.1
   - me.devnatan:inventory-framework-platform:3.5.1
   - me.devnatan:inventory-framework-core:3.5.1
-  # Note: Using bukkit platform instead of paper platform for Spigot
   - me.devnatan:inventory-framework-platform-bukkit:3.5.1
   - org.slf4j:slf4j-api:2.0.17
   - org.slf4j:slf4j-jdk14:2.0.17

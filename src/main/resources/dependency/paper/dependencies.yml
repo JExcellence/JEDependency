@@ -1,5 +1,4 @@
 dependencies:
-  # Paper-specific dependencies
   - org.hibernate.orm:hibernate-core:6.6.4.Final
   - org.javassist:javassist:3.29.2-GA
   - com.mysql:mysql-connector-j:9.0.0
