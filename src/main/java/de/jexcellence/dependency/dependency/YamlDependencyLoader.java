@@ -11,7 +11,8 @@ import java.util.logging.Logger;
  * Utility class for loading dependency configurations from YAML files.
  * 
  * <p>This class is responsible for parsing dependency configurations from
- * YAML files located in the classpath resources. It expects a specific format:</p>
+ * YAML files located in the classpath resources. It supports server-specific
+ * dependency files and expects a specific format:</p>
  * 
  * <pre>
  * dependencies:
@@ -20,7 +21,9 @@ import java.util.logging.Logger;
  * </pre>
  * 
  * <p>The loader supports both quoted and unquoted dependency entries,
- * and automatically filters out comments and empty lines.</p>
+ * and automatically filters out comments and empty lines. It will attempt
+ * to load server-specific dependencies first, then fall back to the generic
+ * dependencies file if no server-specific file is found.</p>
  * 
  * @author JExcellence
  * @version 2.0.0
@@ -29,6 +32,8 @@ import java.util.logging.Logger;
 public final class YamlDependencyLoader {
 	
 	private static final String DEPENDENCIES_YAML_PATH      = "/dependency/dependencies.yml";
+	private static final String PAPER_DEPENDENCIES_PATH     = "/dependency/paper/dependencies.yml";
+	private static final String SPIGOT_DEPENDENCIES_PATH    = "/dependency/spigot/dependencies.yml";
 	private static final String DEPENDENCIES_SECTION_MARKER = "dependencies:";
 	private static final String LIST_ITEM_PREFIX            = "- ";
 	private static final String QUOTED_PREFIX               = "- \"";
@@ -46,11 +51,14 @@ public final class YamlDependencyLoader {
 	}
 	
 	/**
-	 * Loads dependency configurations from the standard YAML file.
+	 * Loads dependency configurations from server-specific or standard YAML files.
 	 *
-	 * <p>This method attempts to load dependencies from the resource file
-	 * {@code /dependency/dependencies.yml} using the provided anchor class
-	 * for resource resolution.</p>
+	 * <p>This method attempts to load dependencies in the following order:</p>
+	 * <ol>
+	 *   <li>Server-specific file (Paper: {@code /dependency/paper/dependencies.yml}, 
+	 *       Spigot: {@code /dependency/spigot/dependencies.yml})</li>
+	 *   <li>Generic file: {@code /dependency/dependencies.yml}</li>
+	 * </ol>
 	 *
 	 * @param anchorClass the class to use for resource loading
 	 *
@@ -64,7 +72,27 @@ public final class YamlDependencyLoader {
 			throw new IllegalArgumentException("Anchor class cannot be null");
 		}
 		
-		this.logger.fine("Attempting to load dependencies from: " + DEPENDENCIES_YAML_PATH);
+		// Try to load server-specific dependencies first
+		final String serverSpecificPath = this.determineServerSpecificPath();
+		if (serverSpecificPath != null) {
+			this.logger.info("Attempting to load server-specific dependencies from: " + serverSpecificPath);
+			
+			try (final InputStream yamlInputStream = anchorClass.getResourceAsStream(serverSpecificPath)) {
+				if (yamlInputStream != null) {
+					this.logger.info("Found server-specific dependency configuration");
+					return this.parseDependenciesFromStream(yamlInputStream);
+				}
+			} catch (final Exception exception) {
+				this.logger.log(
+					Level.WARNING,
+					"Failed to load server-specific dependencies from: " + serverSpecificPath,
+					exception
+				);
+			}
+		}
+		
+		// Fall back to generic dependencies file
+		this.logger.info("Attempting to load generic dependencies from: " + DEPENDENCIES_YAML_PATH);
 		
 		try (final InputStream yamlInputStream = anchorClass.getResourceAsStream(DEPENDENCIES_YAML_PATH)) {
 			if (yamlInputStream == null) {
@@ -80,6 +108,42 @@ public final class YamlDependencyLoader {
 				exception
 			);
 			return null;
+		}
+	}
+	
+	/**
+	 * Determines the server-specific dependency file path based on the current server type.
+	 *
+	 * @return the path to the server-specific dependency file, or null if no specific path applies
+	 */
+	private String determineServerSpecificPath() {
+		
+		if (this.isPaperServer()) {
+			this.logger.fine("Detected Paper server - using Paper-specific dependencies");
+			return PAPER_DEPENDENCIES_PATH;
+		} else {
+			this.logger.fine("Detected Spigot/CraftBukkit server - using Spigot-specific dependencies");
+			return SPIGOT_DEPENDENCIES_PATH;
+		}
+	}
+	
+	/**
+	 * Checks if we're running on Paper server.
+	 * 
+	 * @return true if running on Paper, false if on Spigot/CraftBukkit
+	 */
+	private boolean isPaperServer() {
+		
+		try {
+			Class.forName("com.destroystokyo.paper.PaperConfig");
+			return true;
+		} catch (final ClassNotFoundException exception) {
+			try {
+				Class.forName("io.papermc.paper.configuration.Configuration");
+				return true;
+			} catch (final ClassNotFoundException exception2) {
+				return false;
+			}
 		}
 	}
 	

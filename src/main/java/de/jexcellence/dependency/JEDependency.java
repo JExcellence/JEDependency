@@ -63,11 +63,20 @@ public final class JEDependency {
 		final Class<?> anchorClass,
 		final String[] additionalDependencies
     ) {
-        plugin.getLogger().info("JEDependency initializing on " + getServerType());
+        final String serverType = getServerType();
+		
+        plugin.getLogger().info("JEDependency initializing on " + serverType);
         
         if (isPaperPluginLoaderActive()) {
             plugin.getLogger().info("Paper plugin loader detected - skipping manual JEDependency initialization");
             return;
+        }
+        
+        // Log which dependency loading strategy will be used
+        if (isPaperServer()) {
+            plugin.getLogger().info("Server-specific dependency loading: Paper dependencies will be prioritized");
+        } else {
+            plugin.getLogger().info("Server-specific dependency loading: Spigot dependencies will be prioritized");
         }
 		
         final DependencyManager dependencyManager = new DependencyManager(plugin, anchorClass);
