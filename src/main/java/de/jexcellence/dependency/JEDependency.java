@@ -58,9 +58,16 @@ public final class JEDependency {
      * 
      * @see de.jexcellence.dependency.dependency.DependencyManager#initialize(String[])
      */
-    public static void initialize(final JavaPlugin plugin, 
-                                final Class<?> anchorClass, 
-                                final String[] additionalDependencies) {
+    public static void initialize(
+		final JavaPlugin plugin,
+		final Class<?> anchorClass,
+		final String[] additionalDependencies
+    ) {
+        if (isPaperPluginLoaderActive()) {
+            plugin.getLogger().info("Paper plugin loader detected - skipping manual JEDependency initialization");
+            return;
+        }
+		
         final DependencyManager dependencyManager = new DependencyManager(plugin, anchorClass);
         dependencyManager.initialize(additionalDependencies);
     }
@@ -75,7 +82,31 @@ public final class JEDependency {
      * @param anchorClass the class to use for resource loading and JAR location detection
      * @throws IllegalArgumentException if plugin or anchorClass is null
      */
-    public static void initialize(final JavaPlugin plugin, final Class<?> anchorClass) {
+    public static void initialize(
+		final JavaPlugin plugin,
+		final Class<?> anchorClass
+    ) {
         initialize(plugin, anchorClass, null);
+    }
+    
+    /**
+     * Checks if the Paper plugin loader system is active.
+     * 
+     * @return true if Paper plugin loader is active, false otherwise
+     */
+    private static boolean isPaperPluginLoaderActive() {
+        final String paperLoaderActive = System.getProperty("paper.plugin.loader.active");
+        if ("true".equals(paperLoaderActive)) {
+            return true;
+        }
+		
+        try {
+            Class.forName("io.papermc.paper.plugin.loader.PluginLoader");
+            // If we can load the PluginLoader class, we're likely on Paper
+            // But only skip if the system property is also set to avoid false positives
+            return "true".equals(paperLoaderActive);
+        } catch (final ClassNotFoundException exception) {
+            return false;
+        }
     }
 }
