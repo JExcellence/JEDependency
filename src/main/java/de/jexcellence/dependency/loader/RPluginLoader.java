@@ -9,6 +9,7 @@ import io.papermc.paper.plugin.loader.library.impl.JarLibrary;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -18,6 +19,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarEntry;
@@ -54,6 +56,10 @@ public class RPluginLoader implements PluginLoader {
     private static final String RELOCATIONS_EXCLUDES_PROP = "jedependency.relocations.excludes";
     private static final String PAPER_LOADER_PROP = "paper.plugin.loader.active";
     private static final String REMAPPED_DIR_NAME = "remapped";
+
+    // New: a property JEDependency can set with the plugin group
+    private static final String PLUGIN_GROUP_PROP = "jedependency.plugin.group";
+    private static final String ALT_PLUGIN_GROUP_PROP = "jedependency.group";
 
     /**
      * Logger instance for informational and debug messages.
@@ -327,12 +333,7 @@ public class RPluginLoader implements PluginLoader {
      * Only used when no explicit relocations are provided.
      */
     private int applyAutomaticRelocations(RemappingDependencyManager manager, List<Path> jars) {
-        final String defaultPrefix = "de.jexcellence.remapped";
-        String basePrefix = System.getProperty(RELOCATIONS_PREFIX_PROP, defaultPrefix);
-        if (basePrefix == null || basePrefix.trim().isEmpty()) {
-            basePrefix = defaultPrefix;
-        }
-        basePrefix = basePrefix.trim().replaceAll("\\.$", "");
+        final String basePrefix = resolveRelocationBasePrefix();
 
         final Set<String> excludes = new HashSet<>(defaultExcludedRoots());
         final String excludesProp = System.getProperty(RELOCATIONS_EXCLUDES_PROP);
@@ -361,6 +362,90 @@ public class RPluginLoader implements PluginLoader {
             logger.log(Level.FINE, "Automatic relocation will map " + applied + " root package(s) under '" + basePrefix + "'.");
         }
         return applied;
+    }
+
+    /**
+     * Resolve the base relocation prefix using (in order of precedence):
+     * 1) Explicit system property: jedependency.relocations.prefix
+     * 2) JEDependency-provided plugin group: jedependency.plugin.group (or jedependency.group)
+     * 3) groupId from this plugin's own pom.properties
+     * 4) Heuristic from this class' package
+     * 5) Final fallback
+     */
+    private String resolveRelocationBasePrefix() {
+        final String explicit = System.getProperty(RELOCATIONS_PREFIX_PROP);
+        if (explicit != null && !explicit.trim().isEmpty()) {
+            return normalizePackagePrefix(explicit.trim().replaceAll("\\.$", ""));
+        }
+
+        String group = System.getProperty(PLUGIN_GROUP_PROP);
+        if (group == null || group.isBlank()) {
+            group = System.getProperty(ALT_PLUGIN_GROUP_PROP);
+        }
+
+        if (group == null || group.isBlank()) {
+            group = detectGroupFromPomProperties();
+        }
+
+        if (group == null || group.isBlank()) {
+            group = deriveGroupFromThisPackage();
+        }
+
+        if (group.isBlank()) {
+            group = "de.jexcellence";
+        }
+
+        return normalizePackagePrefix(group + ".remapped");
+    }
+
+    private String deriveGroupFromThisPackage() {
+        String pkg = RPluginLoader.class.getPackageName();
+        // attempt to strip internal suffix to get the organization-level group
+        if (pkg.endsWith(".dependency.loader")) {
+            pkg = pkg.substring(0, pkg.length() - ".dependency.loader".length());
+        }
+        return firstTwoSegments(pkg);
+    }
+
+    private String detectGroupFromPomProperties() {
+        try {
+            URL url = RPluginLoader.class.getProtectionDomain().getCodeSource().getLocation();
+            Path self = Path.of(url.toURI());
+            if (Files.isRegularFile(self) && self.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar")) {
+                try (JarFile jar = new JarFile(self.toFile())) {
+                    for (JarEntry e : java.util.Collections.list(jar.entries())) {
+                        if (!e.isDirectory()
+                                && e.getName().startsWith("META-INF/maven/")
+                                && e.getName().endsWith("/pom.properties")) {
+                            Properties props = new Properties();
+                            try (var in = jar.getInputStream(e)) {
+                                props.load(in);
+                            }
+                            String groupId = props.getProperty("groupId");
+                            if (groupId != null && !groupId.isBlank()) {
+                                return groupId.trim();
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignore) {
+            // best-effort only
+        }
+        return null;
+    }
+
+    private String normalizePackagePrefix(String prefix) {
+        if (prefix == null) return null;
+        String p = prefix.trim();
+        // remove spaces
+        p = p.replace(" ", "");
+        // hyphens to underscores
+        p = p.replace('-', '_');
+        // collapse multiple dots and strip leading/trailing dots
+        p = p.replaceAll("\\.+", ".");
+        p = p.replaceAll("^\\.|\\.$", "");
+        return p;
     }
 
     /**
