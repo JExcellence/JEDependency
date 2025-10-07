@@ -27,12 +27,12 @@ dependencies:
   - org.jboss.logging:jboss-logging:3.5.0.Final
   - org.reflections:reflections:0.9.12
   - com.github.ben-manes.caffeine:caffeine:3.1.8
-  - me.devnatan:inventory-framework-api:3.5.1
-  - me.devnatan:inventory-framework-platform-bukkit:3.5.1
-  - me.devnatan:inventory-framework-anvil-input:3.5.1
-  - me.devnatan:inventory-framework-platform:3.5.1
-  - me.devnatan:inventory-framework-core:3.5.1
-  - me.devnatan:inventory-framework-platform-paper:3.5.1
+  - me.devnatan:inventory-framework-api:3.5.2
+  - me.devnatan:inventory-framework-platform-bukkit:3.5.2
+  - me.devnatan:inventory-framework-anvil-input:3.5.2
+  - me.devnatan:inventory-framework-platform:3.5.2
+  - me.devnatan:inventory-framework-core:3.5.2
+  - me.devnatan:inventory-framework-platform-paper:3.5.2
   - org.slf4j:slf4j-api:2.0.17
   - org.slf4j:slf4j-jdk14:2.0.17
   - com.github.cryptomorin:XSeries:13.3.3
@@ -47,6 +47,7 @@ dependencies:
   - net.kyori:adventure-text-serializer-legacy:4.17.0
   - net.kyori:adventure-text-serializer-plain:4.17.0
   - net.kyori:adventure-text-serializer-gson-legacy-impl:4.17.0
+  - net.kyori:adventure-text-serializer-json-legacy-impl:4.17.0
   - net.kyori:adventure-nbt:4.17.0
   - net.kyori:adventure-platform-facet:4.3.4
   - net.kyori:adventure-platform-api:4.3.4

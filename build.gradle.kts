@@ -17,6 +17,12 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
+    implementation("org.ow2.asm:asm:9.6")
+    implementation("org.ow2.asm:asm-commons:9.6")
+    implementation("org.ow2.asm:asm-util:9.6")
+
+    // Gradle API for the Gradle plugin (compileOnly since it's provided by Gradle)
+    compileOnly(gradleApi())
 }
 
 java {

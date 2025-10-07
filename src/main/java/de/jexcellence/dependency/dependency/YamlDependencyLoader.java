@@ -75,11 +75,8 @@ public final class YamlDependencyLoader {
 		// Try to load server-specific dependencies first
 		final String serverSpecificPath = this.determineServerSpecificPath();
 		if (serverSpecificPath != null) {
-			this.logger.info("Attempting to load server-specific dependencies from: " + serverSpecificPath);
-			
-			try (final InputStream yamlInputStream = anchorClass.getResourceAsStream(serverSpecificPath)) {
+            try (final InputStream yamlInputStream = anchorClass.getResourceAsStream(serverSpecificPath)) {
 				if (yamlInputStream != null) {
-					this.logger.info("Found server-specific dependency configuration");
 					return this.parseDependenciesFromStream(yamlInputStream);
 				}
 			} catch (final Exception exception) {
@@ -90,10 +87,6 @@ public final class YamlDependencyLoader {
 				);
 			}
 		}
-		
-		// Fall back to generic dependencies file
-		this.logger.info("Attempting to load generic dependencies from: " + DEPENDENCIES_YAML_PATH);
-		
 		try (final InputStream yamlInputStream = anchorClass.getResourceAsStream(DEPENDENCIES_YAML_PATH)) {
 			if (yamlInputStream == null) {
 				this.logger.fine("No YAML dependency configuration found at: " + DEPENDENCIES_YAML_PATH);
@@ -155,9 +148,6 @@ public final class YamlDependencyLoader {
 	 * @return array of parsed dependency GAV coordinates
 	 */
 	private String[] parseDependenciesFromStream(final InputStream yamlInputStream) {
-		
-		this.logger.fine("Parsing YAML dependency configuration");
-		
 		final List<String> parsedDependencies      = new ArrayList<>();
 		final Scanner      yamlScanner             = new Scanner(yamlInputStream);
 		boolean            isInDependenciesSection = false;
@@ -168,24 +158,19 @@ public final class YamlDependencyLoader {
 			currentLineNumber++;
 			final String trimmedLine = currentLine.trim();
 			
-			this.logger.finest("Processing line " + currentLineNumber + ": " + currentLine);
-			
 			if (this.isDependenciesSectionStart(trimmedLine)) {
 				isInDependenciesSection = true;
-				this.logger.fine("Found dependencies section at line " + currentLineNumber);
 				continue;
 			}
 			
 			if (isInDependenciesSection) {
 				if (this.isDependenciesSectionEnd(trimmedLine)) {
-					this.logger.fine("End of dependencies section at line " + currentLineNumber);
 					break;
 				}
 				
 				final String dependencyEntry = this.extractDependencyEntry(trimmedLine);
 				if (dependencyEntry != null) {
 					parsedDependencies.add(dependencyEntry);
-					this.logger.fine("Added dependency: " + dependencyEntry);
 				}
 			}
 		}
