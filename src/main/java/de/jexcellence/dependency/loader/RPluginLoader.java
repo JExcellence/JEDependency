@@ -9,6 +9,7 @@ import io.papermc.paper.plugin.loader.library.impl.JarLibrary;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,24 +33,22 @@ import java.util.stream.Stream;
 /**
  * Enhanced Paper plugin loader implementation for dynamically loading external dependencies and libraries.
  *
- * <p>This class is responsible for:
- * <ul>
- *   <li>Ensuring the existence of a {@code libs} directory within the plugin's data directory</li>
- *   <li>Initializing and downloading dependencies using the JEDependency system</li>
- *   <li>Optionally remapping those dependencies into {@code libs/remapped} to avoid classpath conflicts</li>
- *   <li>Adding all JAR files (remapped when available) to the plugin's classpath</li>
- *   <li>Proper resource cleanup and error handling</li>
- * </ul>
- * <p>This enables plugins to manage and load their own dependencies at runtime with enhanced reliability,
- * supporting modular and extensible plugin development while keeping the main JAR size minimal.</p>
+ * Features:
+ * - Ensures existence of a libraries directory in the plugin's data directory
+ * - Initializes and downloads dependencies using the JEDependency system
+ * - Optionally remaps those dependencies into libraries/remapped to avoid classpath conflicts
+ * - Adds all JAR files (remapped when available) to the plugin's classpath
+ * - NEW: Grants classpath access to dependency plugins (e.g., LuckPerms, RCore) so typed integrations work
  *
- * @version 2.1.2
+ * This enables plugins to manage and load their own dependencies at runtime with enhanced reliability,
+ * supporting modular and extensible plugin development while keeping the main JAR size minimal.
+ *
+ * @version 2.2.0
  * @since TBD
- * author JExcellence
+ * @author J
  */
 @SuppressWarnings({"unused", "UnstableApiUsage"})
 public class RPluginLoader implements PluginLoader {
-
     private static final String REMAP_PROP = "jedependency.remap";
     private static final String RELOCATIONS_PROP = "jedependency.relocations";
     private static final String RELOCATIONS_PREFIX_PROP = "jedependency.relocations.prefix";
@@ -57,41 +56,19 @@ public class RPluginLoader implements PluginLoader {
     private static final String PAPER_LOADER_PROP = "paper.plugin.loader.active";
     private static final String REMAPPED_DIR_NAME = "remapped";
 
-    // New: a property JEDependency can set with the plugin group
     private static final String PLUGIN_GROUP_PROP = "jedependency.plugin.group";
     private static final String ALT_PLUGIN_GROUP_PROP = "jedependency.group";
 
-    /**
-     * Logger instance for informational and debug messages.
-     */
     private final Logger logger;
-
-    /**
-     * JEDependency downloader instance.
-     */
     private final DependencyDownloader dependencyDownloader;
-
-    /**
-     * YAML dependency loader for loading dependencies from configuration.
-     */
     private final YamlDependencyLoader yamlLoader;
 
-    /**
-     * Constructs a new {@code RPluginLoader} and initializes the logger and dependency components.
-     */
     public RPluginLoader() {
         this.logger = Logger.getLogger(RPluginLoader.class.getName());
         this.dependencyDownloader = new DependencyDownloader();
         this.yamlLoader = new YamlDependencyLoader();
     }
 
-    /**
-     * Configures the plugin classpath by ensuring the {@code libs} directory exists,
-     * initializing dependencies using the JEDependency system, optionally remapping them,
-     * and adding all JAR files in the chosen directory to the classpath.
-     *
-     * @param classpathBuilder the classpath builder used to add libraries to the plugin's classpath
-     */
     @Override
     public void classloader(final PluginClasspathBuilder classpathBuilder) {
         System.setProperty(PAPER_LOADER_PROP, "true");
@@ -102,7 +79,6 @@ public class RPluginLoader implements PluginLoader {
         try {
             logger.log(Level.INFO, "Initializing plugin classpath with JEDependency system (Paper loader)...");
             Files.createDirectories(libsDirectory);
-
             if (!Files.exists(libsDirectory) || !Files.isDirectory(libsDirectory)) {
                 logger.log(Level.INFO, "Libs directory does not exist or is not a directory: " + libsDirectory);
                 return;
@@ -130,29 +106,25 @@ public class RPluginLoader implements PluginLoader {
 
             loadJarFiles(classpathBuilder, effectiveDirectory);
 
+            exposePluginDependencies(classpathBuilder, Set.of(
+                    "LuckPerms",
+                    "RCore"
+            ));
+
         } catch (final IOException exception) {
             throw new RuntimeException("Failed to create libs directory: " + libsDirectory, exception);
         }
     }
 
-    /**
-     * Initializes dependencies using the JEDependency system.
-     * This method loads dependencies from YAML configuration and downloads them if needed.
-     *
-     * @param libsDirectory the directory where dependencies should be stored
-     */
     private void initializeDependencies(final File libsDirectory) {
         try {
             final String[] yamlDependencies = yamlLoader.loadDependenciesFromYaml(RPluginLoader.class);
-
             if (yamlDependencies != null && yamlDependencies.length > 0) {
                 logger.log(Level.INFO, "Found " + yamlDependencies.length + " dependencies in YAML configuration");
-
                 for (final String dependency : yamlDependencies) {
                     try {
                         logger.log(Level.FINE, "Processing dependency: " + dependency);
                         final File downloadedFile = dependencyDownloader.downloadDependency(dependency, libsDirectory);
-
                         if (downloadedFile != null && downloadedFile.exists()) {
                             logger.log(Level.FINE, "Successfully processed dependency: " + dependency);
                         } else {
@@ -170,12 +142,6 @@ public class RPluginLoader implements PluginLoader {
         }
     }
 
-    /**
-     * Loads all JAR files from the specified directory into the classpath.
-     *
-     * @param classpathBuilder the classpath builder to add libraries to
-     * @param libsDirectory the directory containing JAR files
-     */
     private void loadJarFiles(final PluginClasspathBuilder classpathBuilder, final Path libsDirectory) {
         try (final Stream<Path> jarFiles = Files.walk(libsDirectory, 1)) {
             final AtomicInteger jarCount = new AtomicInteger(0);
@@ -198,10 +164,6 @@ public class RPluginLoader implements PluginLoader {
         }
     }
 
-    /**
-     * Should we remap libraries? Defaults to true for the Paper loader to avoid classpath clashes,
-     * can be disabled with -Djedependency.remap=false.
-     */
     private boolean shouldRemap() {
         final String value = System.getProperty(REMAP_PROP, "true");
         if (value == null) return false;
@@ -209,18 +171,9 @@ public class RPluginLoader implements PluginLoader {
         return "true".equalsIgnoreCase(v) || "1".equals(v) || "yes".equalsIgnoreCase(v) || "on".equalsIgnoreCase(v);
     }
 
-    /**
-     * Attempts to remap each JAR in {@code inputDir} into {@code outputDir} using RemappingDependencyManager.
-     *
-     * <p>Relocations can be supplied via system property:
-     *   -Djedependency.relocations="from.pkg=>to.pkg,com.google.common=>my.plugin.libs.guava"</p>
-     *
-     * @return true if at least one JAR was remapped or a valid cached remapped JAR exists; false otherwise
-     */
     private boolean tryRemapLibraries(final Path inputDir, final Path outputDir) {
         Objects.requireNonNull(inputDir, "inputDir");
         Objects.requireNonNull(outputDir, "outputDir");
-
         try {
             Files.createDirectories(outputDir);
         } catch (IOException e) {
@@ -258,7 +211,6 @@ public class RPluginLoader implements PluginLoader {
 
         for (Path in : inputJars) {
             final Path out = outputDir.resolve(in.getFileName());
-
             if (isUpToDate(out, in)) {
                 logger.log(Level.FINE, "Using cached remapped JAR: " + out.getFileName());
                 processed++;
@@ -297,16 +249,13 @@ public class RPluginLoader implements PluginLoader {
         return remapped > 0;
     }
 
-    /**
-     * Parses relocation mappings from system property and applies them to the manager.
-     * Returns the number of mappings applied.
-     */
     private int applyRelocationsFromProperty(RemappingDependencyManager manager) {
         int applied = 0;
         final String spec = System.getProperty(RELOCATIONS_PROP);
         if (spec == null || spec.trim().isEmpty()) {
             return 0;
         }
+
         final String[] pairs = spec.split(",");
         for (String p : pairs) {
             String s = p.trim();
@@ -316,6 +265,7 @@ public class RPluginLoader implements PluginLoader {
                 logger.log(Level.WARNING, "Invalid relocation mapping, expected 'from=>to': " + s);
                 continue;
             }
+
             String from = s.substring(0, idx).trim();
             String to = s.substring(idx + 2).trim();
             if (!from.isEmpty() && !to.isEmpty()) {
@@ -325,16 +275,12 @@ public class RPluginLoader implements PluginLoader {
                 logger.log(Level.WARNING, "Ignoring empty relocation mapping: " + s);
             }
         }
+
         return applied;
     }
 
-    /**
-     * Automatically detect package roots in the given JARs and relocate them under a configurable prefix.
-     * Only used when no explicit relocations are provided.
-     */
     private int applyAutomaticRelocations(RemappingDependencyManager manager, List<Path> jars) {
         final String basePrefix = resolveRelocationBasePrefix();
-
         final Set<String> excludes = new HashSet<>(defaultExcludedRoots());
         final String excludesProp = System.getProperty(RELOCATIONS_EXCLUDES_PROP);
         if (excludesProp != null && !excludesProp.trim().isEmpty()) {
@@ -364,14 +310,6 @@ public class RPluginLoader implements PluginLoader {
         return applied;
     }
 
-    /**
-     * Resolve the base relocation prefix using (in order of precedence):
-     * 1) Explicit system property: jedependency.relocations.prefix
-     * 2) JEDependency-provided plugin group: jedependency.plugin.group (or jedependency.group)
-     * 3) groupId from this plugin's own pom.properties
-     * 4) Heuristic from this class' package
-     * 5) Final fallback
-     */
     private String resolveRelocationBasePrefix() {
         final String explicit = System.getProperty(RELOCATIONS_PREFIX_PROP);
         if (explicit != null && !explicit.trim().isEmpty()) {
@@ -382,15 +320,12 @@ public class RPluginLoader implements PluginLoader {
         if (group == null || group.isBlank()) {
             group = System.getProperty(ALT_PLUGIN_GROUP_PROP);
         }
-
         if (group == null || group.isBlank()) {
             group = detectGroupFromPomProperties();
         }
-
         if (group == null || group.isBlank()) {
             group = deriveGroupFromThisPackage();
         }
-
         if (group.isBlank()) {
             group = "de.jexcellence";
         }
@@ -400,7 +335,6 @@ public class RPluginLoader implements PluginLoader {
 
     private String deriveGroupFromThisPackage() {
         String pkg = RPluginLoader.class.getPackageName();
-        // attempt to strip internal suffix to get the organization-level group
         if (pkg.endsWith(".dependency.loader")) {
             pkg = pkg.substring(0, pkg.length() - ".dependency.loader".length());
         }
@@ -414,9 +348,7 @@ public class RPluginLoader implements PluginLoader {
             if (Files.isRegularFile(self) && self.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar")) {
                 try (JarFile jar = new JarFile(self.toFile())) {
                     for (JarEntry e : java.util.Collections.list(jar.entries())) {
-                        if (!e.isDirectory()
-                                && e.getName().startsWith("META-INF/maven/")
-                                && e.getName().endsWith("/pom.properties")) {
+                        if (!e.isDirectory() && e.getName().startsWith("META-INF/maven/") && e.getName().endsWith("/pom.properties")) {
                             Properties props = new Properties();
                             try (var in = jar.getInputStream(e)) {
                                 props.load(in);
@@ -430,7 +362,6 @@ public class RPluginLoader implements PluginLoader {
                 }
             }
         } catch (Exception ignore) {
-            // best-effort only
         }
         return null;
     }
@@ -438,20 +369,13 @@ public class RPluginLoader implements PluginLoader {
     private String normalizePackagePrefix(String prefix) {
         if (prefix == null) return null;
         String p = prefix.trim();
-        // remove spaces
         p = p.replace(" ", "");
-        // hyphens to underscores
         p = p.replace('-', '_');
-        // collapse multiple dots and strip leading/trailing dots
         p = p.replaceAll("\\.+", ".");
         p = p.replaceAll("^\\.|\\.$", "");
         return p;
     }
 
-    /**
-     * Detects "root" packages in a JAR (first one or two segments, e.g., com.google).
-     * Excludes any roots that match the excludes list.
-     */
     private Set<String> detectRootPackages(Path jar, Set<String> excludes) {
         final Set<String> roots = new HashSet<>();
         try (JarFile jf = new JarFile(jar.toFile())) {
@@ -460,13 +384,11 @@ public class RPluginLoader implements PluginLoader {
                 final String name = e.getName();
                 if (!name.endsWith(".class")) continue;
                 if (name.endsWith("module-info.class")) continue;
-
                 int lastSlash = name.lastIndexOf('/');
                 if (lastSlash <= 0) continue;
                 String pkgPath = name.substring(0, lastSlash);
                 String pkg = pkgPath.replace('/', '.');
                 String root = firstTwoSegments(pkg);
-
                 if (shouldExclude(root, excludes)) continue;
                 roots.add(root);
             }
@@ -496,21 +418,6 @@ public class RPluginLoader implements PluginLoader {
             }
         }
         return false;
-    }
-
-    private Set<String> defaultExcludedRoots() {
-        return new HashSet<>(Arrays.asList(
-                "java",
-                "javax",
-                "jakarta",
-                "sun",
-                "com.sun",
-                "jdk",
-                "org.w3c",
-                "org.xml",
-                "org.ietf",
-                "org.hibernate"
-        ));
     }
 
     private List<Path> listJarFiles(Path dir) {
@@ -556,5 +463,58 @@ public class RPluginLoader implements PluginLoader {
             logger.log(Level.FINE, "Failed to list jar files in " + directory, e);
             return 0;
         }
+    }
+
+    /**
+     * NEW: Grant classpath access to other plugins declared as dependencies.
+     * This is required for typed integrations with plugins like LuckPerms and RCore
+     * when using a custom PluginLoader with an isolated classloader.
+     *
+     * We use reflection to support multiple Paper versions:
+     * tries common method names on PluginClasspathBuilder, such as:
+     * - addPluginDependency(String)
+     * - addAccessToPlugin(String)
+     * - addPlugin(String)
+     *
+     * If none are present, we log a SEVERE with guidance.
+     */
+    private void exposePluginDependencies(PluginClasspathBuilder builder, Set<String> pluginNames) {
+        for (String name : pluginNames) {
+            boolean added = tryInvokePluginAccess(builder, "addPluginDependency", name)
+                    || tryInvokePluginAccess(builder, "addAccessToPlugin", name)
+                    || tryInvokePluginAccess(builder, "addPlugin", name);
+            if (added) {
+                logger.log(Level.INFO, "Granted classpath access to dependency plugin: " + name);
+            } else {
+                logger.log(Level.SEVERE,
+                        "Could not grant classpath access to dependency plugin '" + name + "' from custom loader. " +
+                                "Update to a Paper version exposing PluginClasspathBuilder accessors, or adjust the loader to " +
+                                "use the correct method for your server version.");
+            }
+        }
+    }
+
+    private boolean tryInvokePluginAccess(PluginClasspathBuilder builder, String methodName, String pluginName) {
+        try {
+            Method m = builder.getClass().getMethod(methodName, String.class);
+            m.invoke(builder, pluginName);
+            return true;
+        } catch (NoSuchMethodException ignored) {
+            return false;
+        } catch (Throwable t) {
+            logger.log(Level.FINE, "Invocation of " + methodName + "(" + pluginName + ") failed: " + t.getMessage(), t);
+            return false;
+        }
+    }
+
+    private Set<String> defaultExcludedRoots() {
+        return new HashSet<>(Arrays.asList(
+                "java", "javax", "jakarta",
+                "sun", "com.sun", "jdk",
+                "org.w3c", "org.xml", "org.ietf",
+                "org.hibernate",
+                "org.slf4j", "org.apache",
+                "org.bukkit", "net.md_5"
+        ));
     }
 }
