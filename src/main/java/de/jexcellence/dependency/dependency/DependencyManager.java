@@ -3,112 +3,78 @@ package de.jexcellence.dependency.dependency;
 import de.jexcellence.dependency.classpath.ClasspathInjector;
 import de.jexcellence.dependency.module.Deencapsulation;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
+import java.net.URISyntaxException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.CodeSource;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
 
 /**
  * Main dependency management system for JEDependency.
- * 
- * <p>This class provides functionality to automatically download and inject
- * dependencies into the classpath at runtime. It supports loading dependencies
- * from both YAML configuration files and programmatically provided GAV coordinates.</p>
- * 
- * <p>The system works by:</p>
- * <ul>
- *   <li>Creating a libraries directory in the plugin's data folder</li>
- *   <li>Downloading missing dependencies from Maven repositories</li>
- *   <li>Injecting the downloaded JARs into the plugin's classloader</li>
- * </ul>
- * 
- * @author JExcellence
- * @version 2.0.0
- * @since 1.0.0
  */
 public final class DependencyManager {
-    
-    private final Logger logger;
+
+    private static final Logger LOGGER = Logger.getLogger(DependencyManager.class.getName());
+    private static final String LIBRARIES_DIRECTORY = "libraries";
+
     private final JavaPlugin plugin;
     private final Class<?> anchorClass;
     private final DependencyDownloader dependencyDownloader;
     private final ClasspathInjector classpathInjector;
     private final YamlDependencyLoader yamlLoader;
-    
-    /**
-     * Creates a new dependency manager instance.
-     * 
-     * @param plugin the plugin instance that owns this dependency manager
-     * @param anchorClass the class to use as anchor for resource loading and JAR location detection
-     * @throws IllegalArgumentException if plugin or anchorClass is null
-     */
-    public DependencyManager(final JavaPlugin plugin, final Class<?> anchorClass) {
-        if (plugin == null) {
-            throw new IllegalArgumentException("Plugin cannot be null");
-        }
-        if (anchorClass == null) {
-            throw new IllegalArgumentException("Anchor class cannot be null");
-        }
-        
-        this.plugin = plugin;
-        this.anchorClass = anchorClass;
-        this.logger = Logger.getLogger(this.getClass().getName());
+
+    public DependencyManager(final @NotNull JavaPlugin plugin, final @NotNull Class<?> anchorClass) {
+        this.plugin = Objects.requireNonNull(plugin, "plugin");
+        this.anchorClass = Objects.requireNonNull(anchorClass, "anchorClass");
         this.dependencyDownloader = new DependencyDownloader();
         this.classpathInjector = new ClasspathInjector();
         this.yamlLoader = new YamlDependencyLoader();
     }
-    
-    /**
-     * Initializes the dependency system and loads all specified dependencies.
-     * 
-     * <p>This method will:</p>
-     * <ul>
-     *   <li>Set up the libraries directory</li>
-     *   <li>Perform module deencapsulation for Java 9+ compatibility</li>
-     *   <li>Load dependencies from YAML configuration if present</li>
-     *   <li>Download and inject all dependencies into the plugin's classloader</li>
-     * </ul>
-     * 
-     * @param additionalDependencies optional array of additional GAV coordinates to load
-     */
-    public void initialize(final String[] additionalDependencies) {
-        this.logger.info("Initializing dependency management system for plugin: " + this.plugin.getName());
-        
+
+    public void initialize(final @Nullable String[] additionalDependencies) {
+        LOGGER.info(() -> "Initializing dependency management for plugin: " + this.plugin.getName());
+
         final File pluginJarFile = this.determinePluginJarLocation();
         if (pluginJarFile == null) {
-            this.logger.severe("Failed to determine plugin JAR location - dependency loading aborted");
+            LOGGER.severe("Failed to determine plugin JAR location - dependency loading aborted");
             return;
         }
-        
+
         final File librariesDirectory = this.setupLibrariesDirectory();
         final ClassLoader targetClassLoader = this.anchorClass.getClassLoader();
-        
+
         this.performModuleDeencapsulation();
-        
+
         final List<String> allDependencies = this.collectAllDependencies(additionalDependencies);
-        
+
         if (allDependencies.isEmpty()) {
-            this.logger.info("No dependencies to process");
+            LOGGER.info("No dependencies to process");
             return;
         }
-        
-        this.logger.info("Processing " + allDependencies.size() + " dependencies...");
-        final DependencyProcessingResult result = this.processDependencies(allDependencies, librariesDirectory, targetClassLoader);
-        
-        this.logProcessingSummary(result, librariesDirectory);
-        this.logger.info("Dependency management system initialization completed");
+
+        LOGGER.info(() -> "Processing " + allDependencies.size() + " dependencies...");
+        final DependencyProcessingResult result = this.processDependencies(
+                allDependencies,
+                librariesDirectory,
+                targetClassLoader
+        );
+
+        this.logProcessingSummary(result, librariesDirectory.toPath());
+        LOGGER.info("Dependency management system initialization completed");
     }
-    
-    /**
-     * Determines the location of the plugin JAR file.
-     * 
-     * @return the plugin JAR file, or null if it cannot be determined
-     */
-    private File determinePluginJarLocation() {
+
+    private @Nullable File determinePluginJarLocation() {
         try {
             final CodeSource codeSource = this.anchorClass.getProtectionDomain().getCodeSource();
             if (codeSource == null) {
@@ -116,156 +82,178 @@ public final class DependencyManager {
             }
             final URL jarLocation = codeSource.getLocation();
             return new File(jarLocation.toURI());
-        } catch (final Exception exception) {
-            this.logger.log(Level.WARNING, "Failed to determine plugin JAR location", exception);
+        } catch (final URISyntaxException exception) {
+            LOGGER.log(Level.WARNING, "Failed to resolve plugin JAR location", exception);
             return null;
         }
     }
-    
-    /**
-     * Sets up the libraries directory where dependencies will be stored.
-     * 
-     * @return the libraries directory
-     */
-    private File setupLibrariesDirectory() {
+
+    private @NotNull File setupLibrariesDirectory() {
         final File pluginDataFolder = this.plugin.getDataFolder();
-        if (!pluginDataFolder.exists()) {
-            pluginDataFolder.mkdirs();
+        if (!pluginDataFolder.exists() && !pluginDataFolder.mkdirs()) {
+            LOGGER.warning("Could not create plugin data folder: " + pluginDataFolder);
         }
-        
-        final File librariesDirectory = new File(pluginDataFolder, "libraries");
-        if (!librariesDirectory.exists()) {
-            librariesDirectory.mkdirs();
+
+        final File librariesDirectory = new File(pluginDataFolder, LIBRARIES_DIRECTORY);
+        if (!librariesDirectory.exists() && !librariesDirectory.mkdirs()) {
+            LOGGER.warning("Could not create libraries directory: " + librariesDirectory);
         }
-        
+
         return librariesDirectory;
     }
-    
-    /**
-     * Performs module deencapsulation for Java 9+ compatibility.
-     */
+
     private void performModuleDeencapsulation() {
         try {
             Deencapsulation.deencapsulate(this.getClass());
-            this.logger.fine("Module deencapsulation completed successfully");
+            LOGGER.fine("Module deencapsulation completed successfully");
         } catch (final Exception exception) {
-            this.logger.log(Level.WARNING, "Module deencapsulation failed", exception);
+            LOGGER.log(Level.FINE, "Module deencapsulation failed", exception);
         }
     }
-    
-    /**
-     * Collects all dependencies from both YAML configuration and additional parameters.
-     * 
-     * @param additionalDependencies optional additional dependencies
-     * @return list of all dependency GAV coordinates
-     */
-    private List<String> collectAllDependencies(final String[] additionalDependencies) {
-        final List<String> allDependencies = new ArrayList<>();
-        
+
+    private @NotNull List<String> collectAllDependencies(final @Nullable String[] additionalDependencies) {
+        final List<String> dependencies = new ArrayList<>();
+
         final String[] yamlDependencies = this.yamlLoader.loadDependenciesFromYaml(this.anchorClass);
-        if (yamlDependencies != null) {
-            this.logger.info("Loaded " + yamlDependencies.length + " dependencies from YAML configuration");
-            for (final String dependency : yamlDependencies) {
-                allDependencies.add(dependency);
-                this.logger.fine("YAML dependency: " + dependency);
-            }
+        if (yamlDependencies != null && yamlDependencies.length > 0) {
+            Collections.addAll(dependencies, yamlDependencies);
+            LOGGER.info(() -> "Loaded " + yamlDependencies.length + " dependencies from YAML configuration");
         } else {
-            this.logger.fine("No YAML configuration found or no dependencies specified");
+            LOGGER.fine("No YAML configuration found or it did not define dependencies");
         }
-        
-        if (additionalDependencies != null) {
-            this.logger.info("Adding " + additionalDependencies.length + " additional dependencies");
-            for (final String dependency : additionalDependencies) {
-                allDependencies.add(dependency);
-                this.logger.fine("Additional dependency: " + dependency);
-            }
+
+        if (additionalDependencies != null && additionalDependencies.length > 0) {
+            Collections.addAll(dependencies, additionalDependencies);
+            LOGGER.info(() -> "Added " + additionalDependencies.length + " additional dependencies");
         }
-        
-        return allDependencies;
+
+        return dependencies;
     }
-    
-    /**
-     * Processes all dependencies by downloading and injecting them.
-     * 
-     * @param dependencies list of dependency GAV coordinates
-     * @param librariesDirectory directory to store downloaded dependencies
-     * @param targetClassLoader classloader to inject dependencies into
-     * @return processing result summary
-     */
-    private DependencyProcessingResult processDependencies(final List<String> dependencies, 
-                                                         final File librariesDirectory, 
-                                                         final ClassLoader targetClassLoader) {
+
+    private @NotNull DependencyProcessingResult processDependencies(
+            final @NotNull List<String> dependencies,
+            final @NotNull File librariesDirectory,
+            final @NotNull ClassLoader targetClassLoader
+    ) {
         final DependencyProcessingResult result = new DependencyProcessingResult();
-        
+
         for (final String dependencyCoordinate : dependencies) {
-            result.totalDependencies++;
-            
+            if (dependencyCoordinate == null || dependencyCoordinate.isBlank()) {
+                LOGGER.warning("Skipping empty dependency coordinate");
+                result.recordInvalid();
+                continue;
+            }
+
+            result.recordAttempt();
             final File downloadedJarFile = this.dependencyDownloader.downloadDependency(
-                dependencyCoordinate, librariesDirectory);
-            
+                    dependencyCoordinate,
+                    librariesDirectory
+            );
+
             if (downloadedJarFile != null && downloadedJarFile.isFile()) {
-                result.successfulDownloads++;
-                
-                final boolean injectionSuccessful = this.classpathInjector.injectIntoClasspath(
-                    targetClassLoader, downloadedJarFile);
-                
-                if (injectionSuccessful) {
-                    result.successfulInjections++;
-                    result.processedDependencies.add(dependencyCoordinate);
+                result.recordDownloadSuccess();
+                final boolean injected = this.classpathInjector.injectIntoClasspath(targetClassLoader, downloadedJarFile);
+                if (injected) {
+                    result.recordInjectionSuccess();
                 } else {
-                    result.failedInjections++;
-                    result.failedDependencies.add(dependencyCoordinate);
+                    result.recordInjectionFailure(dependencyCoordinate);
                 }
             } else {
-                result.failedDownloads++;
-                result.failedDependencies.add(dependencyCoordinate);
+                result.recordDownloadFailure(dependencyCoordinate);
             }
         }
-        
+
         return result;
     }
-    
-    /**
-     * Logs a summary of the dependency processing results.
-     * 
-     * @param result the processing result
-     * @param librariesDirectory the libraries directory
-     */
-    private void logProcessingSummary(final DependencyProcessingResult result, final File librariesDirectory) {
-        this.logger.info("Dependency processing summary:");
-        this.logger.info("  Total: " + result.totalDependencies + 
-                         " | Downloaded: " + result.successfulDownloads + 
-                         " | Injected: " + result.successfulInjections + 
-                         " | Failed: " + (result.failedDownloads + result.failedInjections));
-        
-        if (!result.failedDependencies.isEmpty()) {
-            this.logger.warning("Failed dependencies: " + String.join(", ", result.failedDependencies));
+
+    private void logProcessingSummary(final @NotNull DependencyProcessingResult result, final @NotNull Path librariesDirectory) {
+        LOGGER.info(() -> String.format(
+                "Dependency processing summary: total=%d, downloaded=%d, injected=%d, failed=%d, invalid=%d",
+                result.getTotalDependencies(),
+                result.getSuccessfulDownloads(),
+                result.getSuccessfulInjections(),
+                result.getFailedDownloads() + result.getFailedInjections(),
+                result.getInvalidCoordinates()
+        ));
+
+        if (!result.getFailedDependencies().isEmpty()) {
+            LOGGER.warning(() -> "Failed dependencies: " + String.join(", ", result.getFailedDependencies()));
         }
-        
-        // Count total libraries in directory
-        final File[] libraryFiles = librariesDirectory.listFiles();
-        int totalLibraries = 0;
-        if (libraryFiles != null) {
-            for (final File libraryFile : libraryFiles) {
-                if (libraryFile.isFile() && libraryFile.getName().endsWith(".jar")) {
-                    totalLibraries++;
-                }
-            }
+
+        try (Stream<Path> files = Files.list(librariesDirectory)) {
+            final long jarCount = files
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase().endsWith(".jar"))
+                    .count();
+            LOGGER.info(() -> "Libraries directory contains " + jarCount + " JAR files");
+        } catch (final Exception exception) {
+            LOGGER.log(Level.FINE, "Failed to inspect libraries directory", exception);
         }
-        this.logger.info("Libraries directory contains " + totalLibraries + " JAR files");
-        this.logger.info("Dependencies are isolated to this plugin's classloader");
+
+        LOGGER.info("Dependencies are isolated to this plugin's classloader");
     }
-    
-    /**
-     * Internal class to track dependency processing results.
-     */
+
     private static final class DependencyProcessingResult {
-        public int totalDependencies = 0;
-        public int successfulDownloads = 0;
-        public int successfulInjections = 0;
-        public int failedDownloads = 0;
-        public int failedInjections = 0;
-        public final List<String> processedDependencies = new ArrayList<>();
-        public final List<String> failedDependencies = new ArrayList<>();
+        private int totalDependencies;
+        private int successfulDownloads;
+        private int successfulInjections;
+        private int failedDownloads;
+        private int failedInjections;
+        private int invalidCoordinates;
+        private final List<String> failedDependencies = new ArrayList<>();
+
+        void recordAttempt() {
+            this.totalDependencies++;
+        }
+
+        void recordInvalid() {
+            this.invalidCoordinates++;
+        }
+
+        void recordDownloadSuccess() {
+            this.successfulDownloads++;
+        }
+
+        void recordInjectionSuccess() {
+            this.successfulInjections++;
+        }
+
+        void recordInjectionFailure(final @NotNull String coordinate) {
+            this.failedInjections++;
+            this.failedDependencies.add(coordinate);
+        }
+
+        void recordDownloadFailure(final @NotNull String coordinate) {
+            this.failedDownloads++;
+            this.failedDependencies.add(coordinate);
+        }
+
+        int getTotalDependencies() {
+            return this.totalDependencies;
+        }
+
+        int getSuccessfulDownloads() {
+            return this.successfulDownloads;
+        }
+
+        int getSuccessfulInjections() {
+            return this.successfulInjections;
+        }
+
+        int getFailedDownloads() {
+            return this.failedDownloads;
+        }
+
+        int getFailedInjections() {
+            return this.failedInjections;
+        }
+
+        int getInvalidCoordinates() {
+            return this.invalidCoordinates;
+        }
+
+        @NotNull List<String> getFailedDependencies() {
+            return this.failedDependencies;
+        }
     }
 }
