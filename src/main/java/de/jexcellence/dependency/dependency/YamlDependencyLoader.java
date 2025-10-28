@@ -34,9 +34,7 @@ public final class YamlDependencyLoader {
     }
 
     public @Nullable String[] loadDependenciesFromYaml(final @NotNull Class<?> anchorClass) {
-        if (anchorClass == null) {
-            throw new IllegalArgumentException("Anchor class cannot be null");
-        }
+        Objects.requireNonNull(anchorClass, "anchorClass cannot be null");
 
         final String serverSpecificPath = determineServerSpecificPath();
         if (serverSpecificPath != null) {
