@@ -1,19 +1,9 @@
 package de.jexcellence.dependency.type;
 
+import org.jetbrains.annotations.NotNull;
+
 /**
  * Enumeration of supported Maven repository types.
- * 
- * <p>This enum defines various Maven repositories that can be used for
- * dependency resolution. Each repository type includes its base URL and
- * provides functionality to build complete download paths for artifacts.</p>
- * 
- * <p>The repositories are ordered by reliability and popularity, with
- * Maven Central being the primary repository followed by other well-known
- * public repositories.</p>
- * 
- * @author JExcellence
- * @version 2.0.0
- * @since 1.0.0
  */
 public enum RepositoryType {
     
@@ -68,65 +58,22 @@ public enum RepositoryType {
     PAPERMC("https://repo.papermc.io/repository/maven-public/");
     
     private final String baseUrl;
-    
-    /**
-     * Creates a new repository type with the specified base URL.
-     * 
-     * @param baseUrl the base URL of the repository
-     */
+
     RepositoryType(final String baseUrl) {
-        this.baseUrl = this.normalizeUrl(baseUrl);
+        this.baseUrl = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
     }
-    
-    /**
-     * Gets the base URL of this repository.
-     * 
-     * @return the base URL
-     */
-    public String getBaseUrl() {
+
+    public @NotNull String getBaseUrl() {
         return this.baseUrl;
     }
-    
-    /**
-     * Builds the complete download path for an artifact.
-     * 
-     * <p>This method constructs the full URL path to download a specific
-     * artifact from this repository using Maven's standard directory structure:</p>
-     * 
-     * <pre>
-     * {baseUrl}/{groupId}/{artifactId}/{version}/{artifactId}-{version}.jar
-     * </pre>
-     * 
-     * @param groupId the group ID of the artifact (dots will be converted to slashes)
-     * @param artifactId the artifact ID
-     * @param version the version of the artifact
-     * @return the complete download URL for the artifact
-     * @throws IllegalArgumentException if any parameter is null or empty
-     */
-    public String buildPath(final String groupId, final String artifactId, final String version) {
-        if (groupId == null || groupId.trim().isEmpty()) {
-            throw new IllegalArgumentException("Group ID cannot be null or empty");
-        }
-        if (artifactId == null || artifactId.trim().isEmpty()) {
-            throw new IllegalArgumentException("Artifact ID cannot be null or empty");
-        }
-        if (version == null || version.trim().isEmpty()) {
-            throw new IllegalArgumentException("Version cannot be null or empty");
-        }
-        
+
+    public @NotNull String buildPath(
+            final @NotNull String groupId,
+            final @NotNull String artifactId,
+            final @NotNull String version
+    ) {
         final String normalizedGroupId = groupId.replace('.', '/');
-        final String jarFileName = artifactId + "-" + version + ".jar";
-        
-        return this.baseUrl + normalizedGroupId + "/" + artifactId + "/" + version + "/" + jarFileName;
-    }
-    
-    /**
-     * Normalizes a URL by ensuring it ends with a forward slash.
-     * 
-     * @param url the URL to normalize
-     * @return the normalized URL
-     */
-    private String normalizeUrl(final String url) {
-        return url.endsWith("/") ? url : url + "/";
+        final String jarFileName = artifactId + '-' + version + ".jar";
+        return this.baseUrl + normalizedGroupId + '/' + artifactId + '/' + version + '/' + jarFileName;
     }
 }

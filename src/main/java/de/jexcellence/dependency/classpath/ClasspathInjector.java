@@ -1,110 +1,98 @@
 package de.jexcellence.dependency.classpath;
 
 import de.jexcellence.dependency.module.Deencapsulation;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.File;
 import java.lang.reflect.Method;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Objects;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public final class ClasspathInjector {
-    
+
+    private static final Logger LOGGER = Logger.getLogger(ClasspathInjector.class.getName());
     private static final String ADD_URL_METHOD_NAME = "addURL";
-    
-    private final Logger logger;
-    private final List<URL> injectedUrls = new ArrayList<>();
-    private static boolean deencapsulated = false;
-    
+
+    private final Set<URL> injectedUrls = new LinkedHashSet<>();
+    private static boolean deencapsulated;
+
     public ClasspathInjector() {
-        this.logger = Logger.getLogger(this.getClass().getName());
     }
-    
-    public boolean injectIntoClasspath(final ClassLoader targetClassLoader, final File jarFile) {
-        if (targetClassLoader == null) {
-            this.logger.severe("Target classloader cannot be null");
+
+    public boolean injectIntoClasspath(final @NotNull ClassLoader targetClassLoader, final @NotNull File jarFile) {
+        Objects.requireNonNull(targetClassLoader, "targetClassLoader");
+        Objects.requireNonNull(jarFile, "jarFile");
+
+        if (!validateJarFile(jarFile)) {
             return false;
         }
-        if (jarFile == null) {
-            this.logger.severe("JAR file cannot be null");
-            return false;
-        }
-        
-        this.logger.fine("Injecting JAR into classpath: " + jarFile.getName());
-        
-        if (!this.validateJarFile(jarFile)) {
-            return false;
-        }
-        
-        if (!deencapsulated) {
-            try {
-                Deencapsulation.deencapsulate(this.getClass());
-                deencapsulated = true;
-                this.logger.fine("Module deencapsulation completed successfully");
-            } catch (final Exception exception) {
-                this.logger.log(Level.WARNING, "Module deencapsulation failed - may not work on Java 9+", exception);
-            }
-        }
-        
+
+        LOGGER.fine(() -> "Injecting JAR into classpath: " + jarFile.getAbsolutePath());
+
+        ensureDeencapsulated();
+
         try {
             final URL jarUrl = jarFile.toURI().toURL();
-            
-            if (injectedUrls.contains(jarUrl)) {
-                this.logger.fine("Already injected: " + jarFile.getName());
+            if (!this.injectedUrls.add(jarUrl)) {
+                LOGGER.fine(() -> "JAR already injected: " + jarFile.getName());
                 return true;
             }
-            
+
             final Method addUrlMethod = targetClassLoader.getClass().getDeclaredMethod(ADD_URL_METHOD_NAME, URL.class);
             addUrlMethod.setAccessible(true);
             addUrlMethod.invoke(targetClassLoader, jarUrl);
-            
-            injectedUrls.add(jarUrl);
-            this.logger.fine("Successfully injected JAR: " + jarFile.getName());
+            LOGGER.fine(() -> "Successfully injected JAR: " + jarFile.getName());
             return true;
-            
         } catch (final Exception exception) {
-            this.logger.log(Level.SEVERE, "Failed to inject JAR: " + jarFile.getName(), exception);
+            LOGGER.log(Level.SEVERE, "Failed to inject JAR: " + jarFile.getName(), exception);
             return false;
         }
     }
-    
-    /**
-     * Validates that the JAR file exists and is readable.
-     * 
-     * @param jarFile the JAR file to validate
-     * @return true if the file is valid
-     */
-    private boolean validateJarFile(final File jarFile) {
-        if (!jarFile.exists()) {
-            this.logger.severe("JAR file does not exist: " + jarFile.getAbsolutePath());
-            return false;
-        }
-        
-        if (!jarFile.isFile()) {
-            this.logger.severe("Path is not a file: " + jarFile.getAbsolutePath());
-            return false;
-        }
-        
-        if (!jarFile.canRead()) {
-            this.logger.severe("JAR file is not readable: " + jarFile.getAbsolutePath());
-            return false;
-        }
-        
-        return true;
+
+    public @NotNull Set<URL> getInjectedUrls() {
+        return Set.copyOf(this.injectedUrls);
     }
-    
-    public List<URL> getInjectedUrls() {
-        return new ArrayList<>(injectedUrls);
-    }
-    
-    public boolean isClassAvailable(String className) {
+
+    public boolean isClassAvailable(final @NotNull String className) {
+        Objects.requireNonNull(className, "className");
         try {
             Class.forName(className);
             return true;
-        } catch (ClassNotFoundException e) {
+        } catch (final ClassNotFoundException ignored) {
             return false;
         }
+    }
+
+    private void ensureDeencapsulated() {
+        if (deencapsulated) {
+            return;
+        }
+        try {
+            Deencapsulation.deencapsulate(this.getClass());
+            deencapsulated = true;
+            LOGGER.fine("Module deencapsulation completed successfully");
+        } catch (final Exception exception) {
+            LOGGER.log(Level.FINE, "Module deencapsulation failed - may not work on Java 9+", exception);
+        }
+    }
+
+    private boolean validateJarFile(final @NotNull File jarFile) {
+        if (!jarFile.exists()) {
+            LOGGER.severe("JAR file does not exist: " + jarFile.getAbsolutePath());
+            return false;
+        }
+        if (!jarFile.isFile()) {
+            LOGGER.severe("Path is not a file: " + jarFile.getAbsolutePath());
+            return false;
+        }
+        if (!jarFile.canRead()) {
+            LOGGER.severe("JAR file is not readable: " + jarFile.getAbsolutePath());
+            return false;
+        }
+        return true;
     }
 }

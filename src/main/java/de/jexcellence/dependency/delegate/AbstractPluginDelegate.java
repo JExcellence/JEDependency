@@ -3,6 +3,8 @@ package de.jexcellence.dependency.delegate;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.Objects;
+
 /**
  * Abstract base class for plugin delegates that provides common functionality.
  * 
@@ -13,22 +15,15 @@ import org.jetbrains.annotations.NotNull;
  * if you prefer more control over the implementation.
  */
 public abstract class AbstractPluginDelegate<T extends JavaPlugin> implements PluginDelegate<T> {
-    
+
     private final T impl;
-    
-    /**
-     * Constructor that accepts the JavaPlugin instance.
-     * This is the recommended constructor for most implementations.
-     *
-     */
-    protected AbstractPluginDelegate(
-		final @NotNull T impl
-    ) {
-        this.impl = impl;
+
+    protected AbstractPluginDelegate(final @NotNull T impl) {
+        this.impl = Objects.requireNonNull(impl, "impl");
     }
-    
+
     @Override
     public final @NotNull T getImpl() {
-	    return this.impl;
+        return this.impl;
     }
 }
