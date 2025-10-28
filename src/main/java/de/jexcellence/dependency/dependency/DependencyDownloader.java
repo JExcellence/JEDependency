@@ -1,6 +1,8 @@
 package de.jexcellence.dependency.dependency;
 
 import de.jexcellence.dependency.type.RepositoryType;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -11,14 +13,18 @@ import java.net.URL;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.jar.JarFile;
 
 public final class DependencyDownloader {
+
+    private static final Logger LOGGER = Logger.getLogger(DependencyDownloader.class.getName());
+
     private static final String USER_AGENT = "JEDependency-Downloader/2.0.0";
     private static final String ACCEPT = "application/java-archive, application/octet-stream, */*;q=0.1";
     private static final int CONNECTION_TIMEOUT_MS = 10_000;
@@ -26,193 +32,178 @@ public final class DependencyDownloader {
     private static final int BUFFER_SIZE = 8192;
     private static final int MAX_REDIRECTS = 5;
 
-    private final Logger logger = Logger.getLogger(this.getClass().getName());
-    private final List<String> customRepositories = new ArrayList<>();
+    private final Set<String> customRepositories = new LinkedHashSet<>();
 
-    public void addRepository(String repositoryUrl) {
-        if (!repositoryUrl.endsWith("/")) {
-            repositoryUrl += "/";
-        }
-        this.customRepositories.add(repositoryUrl);
+    public void addRepository(final @NotNull String repositoryUrl) {
+        Objects.requireNonNull(repositoryUrl, "repositoryUrl");
+        final String normalized = repositoryUrl.endsWith("/") ? repositoryUrl : repositoryUrl + "/";
+        this.customRepositories.add(normalized);
     }
-    
-    public File downloadDependency(String gavCoordinates, File targetDirectory) {
-        if (gavCoordinates == null) {
-            throw new IllegalArgumentException("GAV coordinates cannot be null");
-        }
-        if (targetDirectory == null) {
-            throw new IllegalArgumentException("Target directory cannot be null");
-        }
 
-        DependencyCoordinate coordinate = this.parseGavCoordinates(gavCoordinates);
+    public @Nullable File downloadDependency(final @NotNull String gavCoordinates, final @NotNull File targetDirectory) {
+        Objects.requireNonNull(gavCoordinates, "gavCoordinates");
+        Objects.requireNonNull(targetDirectory, "targetDirectory");
+
+        final DependencyCoordinate coordinate = parseGavCoordinates(gavCoordinates);
         if (coordinate == null) {
             return null;
         }
 
-        File targetJarFile = this.createTargetFile(coordinate, targetDirectory);
-        if (this.isFileAlreadyExists(targetJarFile)) {
-            this.logger.fine("Dependency already exists: " + targetJarFile.getName());
+        final File targetJarFile = createTargetFile(coordinate, targetDirectory);
+        if (targetJarFile.isFile() && targetJarFile.length() > 0L) {
+            LOGGER.fine(() -> "Dependency already present: " + targetJarFile.getName());
             return targetJarFile;
         }
 
-        this.logger.fine("Downloading dependency: " + gavCoordinates);
-        return this.attemptDownloadFromRepositories(coordinate, targetJarFile);
+        LOGGER.fine(() -> "Downloading dependency: " + coordinate.getGavString());
+        return attemptDownloadFromRepositories(coordinate, targetJarFile) ? targetJarFile : null;
     }
 
-    private DependencyCoordinate parseGavCoordinates(String gavCoordinates) {
-        String[] coordinateParts = gavCoordinates.split(":");
+    private @Nullable DependencyCoordinate parseGavCoordinates(final String gavCoordinates) {
+        final String[] coordinateParts = gavCoordinates.split(":");
         if (coordinateParts.length < 3) {
-            this.logger.severe("Invalid GAV coordinate format: " + gavCoordinates + " (expected format: group:artifact:version[:classifier])");
+            LOGGER.severe("Invalid GAV coordinate format: " + gavCoordinates + " (expected format: group:artifact:version[:classifier])");
             return null;
         }
-        String classifier = coordinateParts.length > 3 ? coordinateParts[3] : null;
+        final String classifier = coordinateParts.length > 3 ? coordinateParts[3] : null;
         return new DependencyCoordinate(coordinateParts[0], coordinateParts[1], coordinateParts[2], classifier);
     }
 
-    private File createTargetFile(DependencyCoordinate coordinate, File targetDirectory) {
-        StringBuilder fileName = new StringBuilder();
-        fileName.append(coordinate.getArtifactId()).append("-").append(coordinate.getVersion());
-        if (coordinate.getClassifier() != null && !coordinate.getClassifier().isEmpty()) {
-            fileName.append("-").append(coordinate.getClassifier());
+    private File createTargetFile(final DependencyCoordinate coordinate, final File targetDirectory) {
+        final StringBuilder fileName = new StringBuilder();
+        fileName.append(coordinate.artifactId()).append('-').append(coordinate.version());
+        if (coordinate.classifier() != null && !coordinate.classifier().isEmpty()) {
+            fileName.append('-').append(coordinate.classifier());
         }
         fileName.append(".jar");
         return new File(targetDirectory, fileName.toString());
     }
 
-    private boolean isFileAlreadyExists(File targetFile) {
-        return targetFile.isFile() && targetFile.length() > 0L;
-    }
-
-    private File attemptDownloadFromRepositories(DependencyCoordinate coordinate, File targetFile) {
-        for (String customRepo : customRepositories) {
-            String downloadUrl = buildCustomRepoPath(customRepo, coordinate);
-            logger.finest("Trying custom repository at " + downloadUrl);
-            if (this.downloadFromUrl(downloadUrl, targetFile)) {
-                this.logger.fine("Downloaded from custom repository");
-                return targetFile;
-            }
-        }
-        
-        for (RepositoryType repository : RepositoryType.values()) {
-            String downloadUrl = repository.buildPath(coordinate.getGroupId(), coordinate.getArtifactId(), coordinate.getVersion());
-            if (coordinate.getClassifier() != null) {
-                downloadUrl = downloadUrl.replace(".jar", "-" + coordinate.getClassifier() + ".jar");
-            }
-            logger.finest("Trying repository: " + repository.name() + " at " + downloadUrl);
-            if (this.downloadFromUrl(downloadUrl, targetFile)) {
-                this.logger.fine("Downloaded from repository: " + repository.name());
-                return targetFile;
+    private boolean attemptDownloadFromRepositories(final DependencyCoordinate coordinate, final File targetFile) {
+        for (final String customRepo : this.customRepositories) {
+            final String downloadUrl = buildCustomRepoPath(customRepo, coordinate);
+            LOGGER.finest(() -> "Trying custom repository at " + downloadUrl);
+            if (downloadFromUrl(downloadUrl, targetFile)) {
+                LOGGER.fine("Downloaded from custom repository");
+                return true;
             }
         }
 
-        this.logger.warning("Failed to download " + coordinate.getGavString() + " from any repository");
-        return null;
+        for (final RepositoryType repository : RepositoryType.values()) {
+            String downloadUrl = repository.buildPath(coordinate.groupId(), coordinate.artifactId(), coordinate.version());
+            if (coordinate.classifier() != null) {
+                downloadUrl = downloadUrl.replace(".jar", "-" + coordinate.classifier() + ".jar");
+            }
+            final String finalDownloadUrl = downloadUrl;
+            LOGGER.finest(() -> "Trying repository: " + repository.name() + " at " + finalDownloadUrl);
+            if (downloadFromUrl(downloadUrl, targetFile)) {
+                LOGGER.fine(() -> "Downloaded from repository: " + repository.name());
+                return true;
+            }
+        }
+
+        LOGGER.warning("Failed to download " + coordinate.getGavString() + " from any repository");
+        return false;
     }
-    
-    private String buildCustomRepoPath(String repoUrl, DependencyCoordinate coordinate) {
-        String groupPath = coordinate.getGroupId().replace('.', '/');
-        StringBuilder fileName = new StringBuilder();
-        fileName.append(coordinate.getArtifactId()).append("-").append(coordinate.getVersion());
-        if (coordinate.getClassifier() != null && !coordinate.getClassifier().isEmpty()) {
-            fileName.append("-").append(coordinate.getClassifier());
+
+    private String buildCustomRepoPath(final String repoUrl, final DependencyCoordinate coordinate) {
+        final String groupPath = coordinate.groupId().replace('.', '/');
+        final StringBuilder fileName = new StringBuilder();
+        fileName.append(coordinate.artifactId()).append('-').append(coordinate.version());
+        if (coordinate.classifier() != null && !coordinate.classifier().isEmpty()) {
+            fileName.append('-').append(coordinate.classifier());
         }
         fileName.append(".jar");
-        return repoUrl + groupPath + "/" + coordinate.getArtifactId() + "/" + coordinate.getVersion() + "/" + fileName.toString();
+        return repoUrl + groupPath + "/" + coordinate.artifactId() + "/" + coordinate.version() + "/" + fileName;
     }
 
-    private boolean downloadFromUrl(String downloadUrl, File targetFile) {
+    private boolean downloadFromUrl(final String downloadUrl, final File targetFile) {
         try {
             URL url = new URL(downloadUrl);
             int redirects = 0;
 
             while (redirects <= MAX_REDIRECTS) {
-                HttpURLConnection connection = createHttpConnection(url);
-                connection.setInstanceFollowRedirects(false); // handle manually for full control
+                final HttpURLConnection connection = createHttpConnection(url);
+                connection.setInstanceFollowRedirects(false);
 
-                int code = connection.getResponseCode();
+                final int code = connection.getResponseCode();
                 if (code >= 200 && code < 300) {
-                    long contentLength = parseContentLength(connection.getHeaderField("Content-Length"));
-                    String contentType = safeLower(connection.getHeaderField("Content-Type"));
+                    final long contentLength = parseContentLength(connection.getHeaderField("Content-Length"));
+                    final String contentType = safeLower(connection.getHeaderField("Content-Type"));
 
-                    // Stream to a temp file first
-                    File tmp = new File(targetFile.getParentFile(), targetFile.getName() + ".part");
+                    final File tmp = new File(targetFile.getParentFile(), targetFile.getName() + ".part");
                     Files.createDirectories(targetFile.getParentFile().toPath());
 
-                    long bytesWritten = 0L;
+                    final long bytesWritten;
                     try (InputStream in = connection.getInputStream();
                          FileOutputStream out = new FileOutputStream(tmp)) {
                         bytesWritten = copyStreamToFile(in, out);
                     }
 
                     if (contentLength > 0 && bytesWritten != contentLength) {
-                        logger.warning(String.format(Locale.ROOT,
-                                "Content-Length mismatch for %s: expected %d, got %d", url, contentLength, bytesWritten));
+                        LOGGER.warning(String.format(Locale.ROOT,
+                                "Content-Length mismatch for %s: expected %d, got %d",
+                                url, contentLength, bytesWritten));
                         safeDelete(tmp);
                         return false;
                     }
 
                     if (bytesWritten <= 0) {
-                        logger.warning("Downloaded 0 bytes from " + url + " — treating as failure");
+                        LOGGER.warning("Downloaded 0 bytes from " + url + " — treating as failure");
                         safeDelete(tmp);
                         return false;
                     }
 
                     if (!isJarFile(tmp)) {
-                        logger.warning("Downloaded file is not a valid JAR, deleting: " + tmp.getName() +
-                                " (Content-Type=" + contentType + ", bytes=" + bytesWritten + ")");
+                        LOGGER.warning("Downloaded file is not a valid JAR, deleting: " + tmp.getName()
+                                + " (Content-Type=" + contentType + ", bytes=" + bytesWritten + ")");
                         safeDelete(tmp);
                         return false;
                     }
 
-                    // Move into place atomically when possible
                     try {
                         Files.move(tmp.toPath(), targetFile.toPath(),
                                 StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-                    } catch (AtomicMoveNotSupportedException e) {
+                    } catch (final AtomicMoveNotSupportedException ignored) {
                         Files.move(tmp.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
                     }
 
-                    logger.fine(String.format(Locale.ROOT,
+                    LOGGER.fine(String.format(Locale.ROOT,
                             "Successfully downloaded %s (%d bytes, Content-Type=%s) to %s",
                             url, bytesWritten, contentType, targetFile.getAbsolutePath()));
                     return true;
                 }
 
-                // Handle redirects
                 if (code >= 300 && code < 400) {
-                    String location = connection.getHeaderField("Location");
+                    final String location = connection.getHeaderField("Location");
                     if (location == null || location.isEmpty()) {
-                        logger.warning("Redirect without Location header from: " + url);
+                        LOGGER.warning("Redirect without Location header from: " + url);
                         cleanupFailedDownload(targetFile);
                         return false;
                     }
-                    URL next = new URL(url, location);
-                    logger.finest("Redirect " + code + " to " + next);
-                    url = next;
+                    url = new URL(url, location);
+                    LOGGER.finest("Redirect " + code + " to " + url);
                     redirects++;
                     continue;
                 }
 
-                // Other HTTP errors
-                String msg = "HTTP " + code + " when downloading " + url;
-                logger.warning(msg);
+                LOGGER.warning("HTTP " + code + " when downloading " + url);
                 cleanupFailedDownload(targetFile);
                 return false;
             }
 
-            logger.warning("Too many redirects (" + MAX_REDIRECTS + ") for " + downloadUrl);
+            LOGGER.warning("Too many redirects (" + MAX_REDIRECTS + ") for " + downloadUrl);
             cleanupFailedDownload(targetFile);
             return false;
-
-        } catch (Exception exception) {
-            this.logger.log(Level.FINE, "Download failed from URL: " + downloadUrl, exception);
-            this.cleanupFailedDownload(targetFile);
+        } catch (final Exception exception) {
+            LOGGER.log(Level.FINE, "Download failed from URL: " + downloadUrl, exception);
+            cleanupFailedDownload(targetFile);
             return false;
         }
     }
 
-    private HttpURLConnection createHttpConnection(URL url) throws IOException {
-        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+    private HttpURLConnection createHttpConnection(final URL url) throws IOException {
+        final HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setConnectTimeout(CONNECTION_TIMEOUT_MS);
         connection.setReadTimeout(READ_TIMEOUT_MS);
         connection.setRequestProperty("User-Agent", USER_AGENT);
@@ -220,8 +211,8 @@ public final class DependencyDownloader {
         return connection;
     }
 
-    private long copyStreamToFile(InputStream inputStream, FileOutputStream outputStream) throws IOException {
-        byte[] buffer = new byte[BUFFER_SIZE];
+    private long copyStreamToFile(final InputStream inputStream, final FileOutputStream outputStream) throws IOException {
+        final byte[] buffer = new byte[BUFFER_SIZE];
         long total = 0L;
         int bytesRead;
         while ((bytesRead = inputStream.read(buffer)) != -1) {
@@ -233,66 +224,54 @@ public final class DependencyDownloader {
         return total;
     }
 
-    private boolean isJarFile(File file) {
-        if (!file.isFile()) return false;
-        if (file.length() < 1024) return false; // heuristic: too small to be a real JAR
-        try (JarFile jf = new JarFile(file, true)) {
-            return jf.entries().hasMoreElements();
-        } catch (Exception ignored) {
+    private boolean isJarFile(final File file) {
+        if (!file.isFile() || file.length() < 1024) {
+            return false;
+        }
+        try (JarFile ignored = new JarFile(file, true)) {
+            return true;
+        } catch (final Exception exception) {
+            LOGGER.log(Level.FINE, "Failed to verify JAR file: " + file.getName(), exception);
             return false;
         }
     }
 
-    private void cleanupFailedDownload(File targetFile) {
-        // Clean only the final file; temp .part files are handled where created
+    private void cleanupFailedDownload(final File targetFile) {
         if (targetFile.exists() && !targetFile.delete()) {
-            this.logger.warning("Failed to clean up partially downloaded file: " + targetFile.getName());
+            LOGGER.warning("Failed to clean up partially downloaded file: " + targetFile.getName());
         }
     }
 
-    private void safeDelete(File f) {
+    private void safeDelete(final File file) {
         try {
-            Files.deleteIfExists(f.toPath());
-        } catch (IOException e) {
-            logger.log(Level.FINE, "Failed to delete file: " + f, e);
+            Files.deleteIfExists(file.toPath());
+        } catch (final IOException exception) {
+            LOGGER.log(Level.FINE, "Failed to delete file: " + file, exception);
         }
     }
 
-    private long parseContentLength(String header) {
-        if (header == null) return -1L;
+    private long parseContentLength(final String header) {
+        if (header == null) {
+            return -1L;
+        }
         try {
             return Long.parseLong(header.trim());
-        } catch (NumberFormatException e) {
+        } catch (final NumberFormatException ignored) {
             return -1L;
         }
     }
 
-    private String safeLower(String s) {
-        return s == null ? null : s.toLowerCase(Locale.ROOT);
+    private String safeLower(final String value) {
+        return value == null ? null : value.toLowerCase(Locale.ROOT);
     }
 
-    private static final class DependencyCoordinate {
-        private final String groupId;
-        private final String artifactId;
-        private final String version;
-        private final String classifier;
+    private record DependencyCoordinate(String groupId, String artifactId, String version, @Nullable String classifier) {
 
-        public DependencyCoordinate(String groupId, String artifactId, String version, String classifier) {
-            this.groupId = groupId;
-            this.artifactId = artifactId;
-            this.version = version;
-            this.classifier = classifier;
-        }
-
-        public String getGroupId() { return this.groupId; }
-        public String getArtifactId() { return this.artifactId; }
-        public String getVersion() { return this.version; }
-        public String getClassifier() { return this.classifier; }
-        public String getGavString() { 
-            StringBuilder sb = new StringBuilder();
-            sb.append(this.groupId).append(":").append(this.artifactId).append(":").append(this.version);
+        String getGavString() {
+            final StringBuilder sb = new StringBuilder();
+            sb.append(this.groupId).append(':').append(this.artifactId).append(':').append(this.version);
             if (this.classifier != null && !this.classifier.isEmpty()) {
-                sb.append(":").append(this.classifier);
+                sb.append(':').append(this.classifier);
             }
             return sb.toString();
         }
