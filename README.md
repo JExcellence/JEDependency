@@ -14,10 +14,11 @@ plugin only.
 2. [Requirements](#requirements)
 3. [Installation](#installation)
 4. [Quick Start](#quick-start)
-5. [Paper Plugin Loader Integration](#paper-plugin-loader-integration)
-6. [Configuration & System Properties](#configuration--system-properties)
-7. [Logging](#logging)
-8. [Troubleshooting](#troubleshooting)
+5. [Plugin Delegate Pattern](#plugin-delegate-pattern)
+6. [Paper Plugin Loader Integration](#paper-plugin-loader-integration)
+7. [Configuration & System Properties](#configuration--system-properties)
+8. [Logging](#logging)
+9. [Troubleshooting](#troubleshooting)
 
 ## Features
 
@@ -110,6 +111,65 @@ JEDependency.initialize(
         }
 );
 ```
+
+## Plugin Delegate Pattern
+
+JEDependency encourages a clean architecture that separates the plugin bootstrap (the Bukkit/Paper entry point) from the
+implementation of your business logic. This delegate pattern keeps the lifecycle wiring thin while letting you share code
+between platforms or test your plugin logic without a running server.
+
+### Bootstrap Class
+
+```java
+public final class JExcellenceShopPlugin extends JavaPlugin {
+    private PluginDelegate delegate;
+
+    @Override
+    public void onLoad() {
+        JEDependency.initialize(this, JExcellenceShopPlugin.class);
+        this.delegate = new JExcellenceShopPluginImpl();
+        this.delegate.onLoad(this);
+    }
+
+    @Override
+    public void onEnable() {
+        this.delegate.onEnable(this);
+    }
+
+    @Override
+    public void onDisable() {
+        this.delegate.onDisable(this);
+    }
+}
+```
+
+### Delegate Implementation
+
+```java
+public final class JExcellenceShopPluginImpl extends AbstractPluginDelegate {
+    @Override
+    protected void handleEnable(final JavaPlugin plugin) {
+        getLogger().info("JExcellence shop systems are ready for players!");
+        // Initialize services, commands, schedulers …
+    }
+
+    @Override
+    protected void handleDisable(final JavaPlugin plugin) {
+        getLogger().info("Saving active carts before shutdown.");
+        // Gracefully shut down services.
+    }
+}
+```
+
+### Why Use Delegates?
+
+- **Testability** – Instantiate the delegate directly in unit tests without booting the server runtime.
+- **Separation of concerns** – Keep dependency bootstrap and server integration minimal while the delegate owns business
+  logic.
+- **Reusability** – Share the same delegate across Paper and other platforms by changing only the tiny bootstrap class.
+
+You can provide your own `PluginDelegate` implementation or extend `AbstractPluginDelegate` to hook into the lifecycle
+with convenient overridable methods.
 
 ## Paper Plugin Loader Integration
 
